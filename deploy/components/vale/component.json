@@ -1,0 +1,16 @@
+{
+  "component": "Vale", "task_key": "CP080", "version": "3.25.1",
+  "classification": "bounded-job-or-library", "production_authorized": false,
+  "source": {"url": "https://github.com/vale-cli/vale/releases/tag/v3.25.1", "tag_commit": "d7a379da688e3ec07138ef94e4f0f0889954d617", "archive": "vale_3.25.1_Linux_64-bit.tar.gz", "api_reported_archive_sha256": "4bf5c5176b682b1da0830f471584d3494f1c2e27ee3029e1ad6f6661d4962182", "archive_verification": "NOT_RUN", "executable_sha256": null, "adoption_receipt": null},
+  "runtime": {"persistent_processes": [], "transient_processes": ["Python stdlib wrapper", "Vale --version", "Vale lint"], "python": "3.10+ proposed; target verification NOT_RUN", "target": "Linux x86_64 proposed; compatibility NOT_RUN", "native_database": null, "native_cache": null, "uid": null, "gid": null, "ownership": "root-approved unprivileged executor; private temporary directory; immutable binary/config; approved read-only synthetic input"},
+  "network": {"ingress": "none", "egress": "deny all by external executor; NOT_RUN"},
+  "volumes": ["read-only approved executable", "read-only approved input", "bounded private temporary working directory"], "secret_references": [],
+  "limits": {"cpu": 1, "memory_mib": 1536, "gpu": 0, "slots": 1, "timeout_seconds_per_process": 10, "input_bytes": 262144, "combined_process_output_bytes": 1048576, "pids": "executor enforced; NOT_RUN", "disk": "executor quota required; NOT_RUN"},
+  "startup": "verify executable digest, exact version and config/rule pins before lint", "readiness": "successful real synthetic clean/forbidden regression; NOT_RUN", "liveness": "one-shot process exit; no daemon",
+  "state": "HOLD on every result/restart; immutable lint artifact only; native OpenProject owner revalidates authority/revision",
+  "migration": "none; no persistent schema", "backup": "versioned component config/rule/pins and approved executable receipt", "restore": "restore reviewed pair and rerun root real tests; retain HOLD", "rollback": "restore previous reviewed component and executable receipt; never replay outbound actions",
+  "logs": "structured codes/digests/line numbers only; no matches/messages/document/path/stderr",
+  "license": {"upstream": "MIT; Copyright (c) 2016 Joseph Kato", "notice": "LICENSE.upstream.txt", "third_party_inventory": "NOT_RUN"},
+  "sbom": "NOT_RUN: exact adopted archive/executable required", "vulnerability_scan": "NOT_RUN: exact artifact required",
+  "qualification": "Static authored candidate only. All 576 runtime acceptance IDs, G02 and production remain held."
+}

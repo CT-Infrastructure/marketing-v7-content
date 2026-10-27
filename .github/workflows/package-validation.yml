@@ -19,3 +19,5 @@ jobs:
           persist-credentials: false
       - name: Validate package and build DAG
         run: python3 tools/validate_scope.py
+      - name: Validate bounded CP080 Vale job
+        run: bash .github/scripts/validate-cp080-vale.sh
