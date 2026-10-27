@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 && $(id -u) != 0 ]] || { echo 'CP080 requires nonroot Linux x86_64' >&2; exit 1; }
-for command in python3 curl bwrap timeout prlimit sha256sum tar; do
+for command in python3 curl timeout prlimit sha256sum tar dpkg dpkg-query dpkg-deb; do
   command -v "$command" >/dev/null || { echo "CP080 missing required capability: $command" >&2; exit 1; }
 done
 python3 - <<'CP080_PY'
@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -47,7 +48,7 @@ def snapshot():
     require(all(p.is_file() or p.is_dir() for p in items), 'nonregular component entry')
     return {p.relative_to(COMPONENT).as_posix(): sha(p) for p in files}
 
-def bounded(argv, seconds, cwd=None):
+def bounded(argv, seconds, cwd=None, output_limit=OUTPUT_LIMIT, stream_limits=None):
     # timeout contains the whole foreground process group; bwrap dies with parent.
     proc = subprocess.Popen(['/usr/bin/timeout', '--kill-after=5', str(seconds), *argv],
                             cwd=cwd, env=SAFE_ENV, stdin=subprocess.DEVNULL,
@@ -57,11 +58,12 @@ def bounded(argv, seconds, cwd=None):
     exceeded = threading.Event()
     def drain(pipe, index):
         while True:
-            block = pipe.read(4096)
+            block = pipe.read(min(4096, output_limit + 1))
             if not block:
                 break
             with lock:
-                if sum(map(len, chunks)) + len(block) > OUTPUT_LIMIT:
+                if (sum(map(len, chunks)) + len(block) > output_limit or
+                        (stream_limits is not None and len(chunks[index]) + len(block) > stream_limits[index])):
                     exceeded.set()
                     # TERM timeout itself: timeout forwards TERM to managed group.
                     proc.terminate()
@@ -81,8 +83,128 @@ def bounded(argv, seconds, cwd=None):
     for thread in threads:
         thread.join(timeout=2)
     require(not any(t.is_alive() for t in threads), 'process pipe teardown incomplete')
-    require(not exceeded.is_set(), 'bounded process output exceeded 1MiB')
+    require(not exceeded.is_set(), 'bounded process output exceeded configured cap')
     return code, bytes(chunks[0]), bytes(chunks[1])
+
+# Ubuntu signed InRelease -> Packages.xz -> Noble .3 package SHA256.
+# Provenance fingerprint F6ECB3762474EDA9D21B7022871920D1991BC93C.
+# LGPL-2+ notice retained privately; no other archive member is installed.
+NATIVE_URL = 'https://security.ubuntu.com/ubuntu/pool/main/b/bubblewrap/bubblewrap_0.9.0-1ubuntu0.3_amd64.deb'
+NATIVE_SHA256 = '2461f1beee9cb04c8942739fe1a2b37e7b7c2a3d518f0779dc75f9245baa3094'
+NATIVE_BINARY_SHA256 = 'e318903862396f96de3df57264e0158682b952fd3fb53ac23d876413e7b30f71'
+NATIVE_NOTICE_SHA256 = '229a402fddba5c81005950f28de162359383cba731f5b859b8f82a03c338bf01'
+NATIVE_MEMBERS = [{'name': '.', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/bin', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/bin/bwrap', 'type': '0', 'size': 72160, 'link': ''}, {'name': './usr/lib', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/lib/sysctl.d', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/lib/sysctl.d/50-bubblewrap.conf', 'type': '0', 'size': 403, 'link': ''}, {'name': './usr/share', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/bash-completion', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/bash-completion/completions', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/bash-completion/completions/bwrap', 'type': '0', 'size': 1159, 'link': ''}, {'name': './usr/share/bug', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/bug/bubblewrap', 'type': '0', 'size': 319, 'link': ''}, {'name': './usr/share/doc', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/doc/bubblewrap', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/doc/bubblewrap/README.Debian.gz', 'type': '0', 'size': 2391, 'link': ''}, {'name': './usr/share/doc/bubblewrap/README.md.gz', 'type': '0', 'size': 4692, 'link': ''}, {'name': './usr/share/doc/bubblewrap/changelog.Debian.gz', 'type': '0', 'size': 3409, 'link': ''}, {'name': './usr/share/doc/bubblewrap/copyright', 'type': '0', 'size': 3388, 'link': ''}, {'name': './usr/share/doc/bubblewrap/examples', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/doc/bubblewrap/examples/bubblewrap-shell.sh', 'type': '0', 'size': 1204, 'link': ''}, {'name': './usr/share/doc/bubblewrap/examples/flatpak-run.sh', 'type': '0', 'size': 2642, 'link': ''}, {'name': './usr/share/doc/bubblewrap/examples/flatpak.bpf', 'type': '0', 'size': 744, 'link': ''}, {'name': './usr/share/doc/bubblewrap/examples/userns-block-fd.py', 'type': '0', 'size': 969, 'link': ''}, {'name': './usr/share/man', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/man/man1', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/man/man1/bwrap.1.gz', 'type': '0', 'size': 5338, 'link': ''}, {'name': './usr/share/zsh', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/zsh/vendor-completions', 'type': '5', 'size': 0, 'link': ''}, {'name': './usr/share/zsh/vendor-completions/_bwrap', 'type': '0', 'size': 7396, 'link': ''}]
+
+def verify_runner_target():
+    fields = {}
+    for line in Path('/etc/os-release').read_text(encoding='utf-8').splitlines():
+        if not line or line.startswith('#'):
+            continue
+        require('=' in line, 'malformed os-release')
+        key, value = line.split('=', 1)
+        require(key not in fields, 'duplicate os-release key')
+        fields[key] = value.strip('"')
+    require(fields.get('ID') == 'ubuntu' and fields.get('VERSION_ID') == '24.04',
+            'native bootstrap requires Ubuntu 24.04')
+    code, data, err = bounded(['/usr/bin/dpkg', '--print-architecture'], 5)
+    require(code == 0 and data == b'amd64\n' and not err, 'native bootstrap requires dpkg amd64')
+
+def verify_existing_dependencies():
+    for package, minimum in [('libc6', '2.38'), ('libcap2', '1:2.10'), ('libselinux1', '3.1~')]:
+        code, data, err = bounded(['/usr/bin/dpkg-query', '-W',
+            '-f=${db:Status-Status} ${Version}\n', package], 5)
+        require(code == 0 and not err and len(data) <= 512, 'missing native dependency: ' + package)
+        match = re.fullmatch(rb'installed ([0-9][A-Za-z0-9.+:~\-]*)\n', data)
+        require(match is not None, 'invalid installed dependency status/version: ' + package)
+        actual = match.group(1).decode('ascii')
+        code, data, err = bounded(['/usr/bin/dpkg', '--compare-versions', actual, 'ge', minimum], 5)
+        require(code == 0 and not data and not err, 'native dependency too old: ' + package)
+
+def owned_file(path, expected_stat=None):
+    info = path.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1,
+            'native artifact must be owned single-link regular file')
+    if expected_stat is not None:
+        require((info.st_dev, info.st_ino, info.st_size) ==
+                (expected_stat.st_dev, expected_stat.st_ino, expected_stat.st_size),
+                'native artifact identity changed')
+    return info
+
+def download_pinned_package(native):
+    # No redirect/retry/config/proxy environment. Exactly one literal HTTPS URL.
+    code, body, diagnostic = bounded(['/usr/bin/curl', '-q', '--fail', '--silent', '--show-error',
+        '--proto', '=https', '--proto-redir', '=https', '--max-redirs', '0',
+        '--connect-timeout', '10', '--max-time', '45', '--max-filesize', '50436',
+        '--write-out', '%{stderr}CP080_HTTP=%{http_code}', NATIVE_URL], 45, output_limit=50565, stream_limits=(50437, 128))
+    require(code == 0 and diagnostic == b'CP080_HTTP=200', 'pinned native HTTPS acquisition failed')
+    require(len(body) == 50436 and hashlib.sha256(body).hexdigest() == NATIVE_SHA256,
+            'native package length/SHA256 mismatch')
+    package = native / 'bubblewrap.deb'
+    fd = os.open(package, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as target:
+        target.write(body)
+        target.flush()
+        opened = os.fstat(target.fileno())
+    owned_file(package, opened)
+    require(sha(package) == NATIVE_SHA256, 'native package changed after write')
+    return package
+
+def extract_verified_members(native, package):
+    original = owned_file(package)
+    require(original.st_size == 50436 and sha(package) == NATIVE_SHA256, 'native decoder input mismatch')
+    code, data, err = bounded(['/usr/bin/dpkg-deb', '--fsys-tarfile', str(package)], 10)
+    owned_file(package, original)
+    require(sha(package) == NATIVE_SHA256, 'native package changed during decoder')
+    require(code == 0 and not err and len(data) <= 1048576, 'bounded native data-only decoder failed')
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as archive:
+        entries = []
+        payloads = {}
+        for member in archive:
+            require(len(entries) < 64, 'native archive member cap')
+            name = member.name
+            require(not name.startswith('/') and '\\' not in name and
+                    '..' not in name.split('/') and member.type in (b'0', b'5') and not member.linkname,
+                    'unsafe native archive name/type/link')
+            require(name not in {e['name'] for e in entries}, 'duplicate native archive member')
+            entries.append({'name': name, 'type': member.type.decode('ascii'),
+                            'size': member.size, 'link': member.linkname})
+            require(entries[-1] in NATIVE_MEMBERS, 'native member differs from frozen manifest')
+            if name in ('./usr/bin/bwrap', './usr/share/doc/bubblewrap/copyright'):
+                stream = archive.extractfile(member)
+                require(stream is not None, 'native selected regular member missing')
+                with stream:
+                    payloads[name] = stream.read(member.size + 1)
+                require(len(payloads[name]) == member.size, 'native selected member length mismatch')
+        require(entries == NATIVE_MEMBERS, 'native full30 name/type/size/link manifest mismatch')
+    selected = [('./usr/bin/bwrap', 'bwrap', 72160, NATIVE_BINARY_SHA256, 0o700),
+                ('./usr/share/doc/bubblewrap/copyright', 'COPYRIGHT.LGPL-2+', 3388, NATIVE_NOTICE_SHA256, 0o400)]
+    for member, filename, size, expected, mode in selected:
+        data = payloads.get(member, b'')
+        require(len(data) == size and hashlib.sha256(data).hexdigest() == expected,
+                'native binary/notice exact payload mismatch')
+        destination = native / filename
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as target:
+            target.write(data)
+            target.flush()
+            os.fchmod(target.fileno(), mode)
+            opened = os.fstat(target.fileno())
+        owned_file(destination, opened)
+        require(sha(destination) == expected, 'native extracted bytes changed')
+    # This private path is the sole runtime executable source: no env/host fallback.
+    return native / 'bwrap'
+
+def controlled_bwrap_path(parent):
+    native = parent / 'native'
+    native.mkdir(mode=0o700)
+    require(native.lstat().st_uid == os.getuid() and stat.S_IMODE(native.lstat().st_mode) == 0o700,
+            'native bootstrap directory must be private-owned')
+    verify_runner_target()
+    verify_existing_dependencies()
+    package = download_pinned_package(native)  # Always fetched, even if host bwrap exists.
+    binary = extract_verified_members(native, package)
+    print('Private pinned bubblewrap .3 verified; LGPL-2+ notice/source provenance retained; not installed/adopted')
+    return binary
 
 # Executed only inside the read-only, no-network, private-tmp sandbox.
 SANDBOX = r'''
@@ -110,7 +232,9 @@ for family, target in [(socket.AF_INET, ('192.0.2.1', 9)),
               'unexpected network probe failure')
 st = os.statvfs('/tmp')
 check(0 < st.f_blocks * st.f_frsize <= 67108864, 'private tmp exceeds 64MiB quota')
-if mode == 'setup':
+if mode == 'probe':
+    print('PROBE: verified private bwrap nonroot/RO/no-network namespace and private tmp confinement succeeded')
+elif mode == 'setup':
     # Never touches host tmp: /tmp is this sandbox newly created size-limited tmpfs.
     with tempfile.TemporaryDirectory(prefix='quota-', dir='/tmp') as probe:
         check(os.stat(probe).st_uid == os.getuid(), 'quota probe not private-owned')
@@ -252,6 +376,7 @@ outer_net = os.readlink('/proc/self/ns/net')
 with tempfile.TemporaryDirectory(prefix='cp080-ci-', dir=os.environ.get('RUNNER_TEMP')) as tmp:
     tmp = Path(tmp)
     os.chmod(tmp, 0o700)
+    bwrap_binary = controlled_bwrap_path(tmp)
     archive, sums, binary = tmp/'vale.tar.gz', tmp/'checksums.txt', tmp/'vale'
     base = 'https://github.com/vale-cli/vale/releases/download/v3.25.1/'
     for url, destination in [(base+'vale_3.25.1_Linux_64-bit.tar.gz', archive),
@@ -281,9 +406,9 @@ with tempfile.TemporaryDirectory(prefix='cp080-ci-', dir=os.environ.get('RUNNER_
     require(sha(COMPONENT/'LICENSE.upstream.txt')==LICENSE, 'candidate upstream notice mismatch')
     binary.chmod(0o500)
     print('Acquisition verified; not adoption or runtime qualification')
-    for mode, seconds in [('setup',20),('observer',90),('normal',90),('optimized',90)]:
+    for mode, seconds in [('probe',20),('setup',20),('observer',90),('normal',90),('optimized',90)]:
         argv = ['/usr/bin/prlimit','--as=2147483648','--cpu=90','--nofile=128','--fsize=16777216',
-                '/usr/bin/bwrap','--unshare-all','--die-with-parent','--new-session','--cap-drop','ALL',
+                str(bwrap_binary),'--unshare-all','--die-with-parent','--new-session','--cap-drop','ALL',
                 '--ro-bind','/usr','/usr','--ro-bind','/lib','/lib']
         if Path('/lib64').exists():
             argv += ['--ro-bind','/lib64','/lib64']
@@ -302,7 +427,8 @@ with tempfile.TemporaryDirectory(prefix='cp080-ci-', dir=os.environ.get('RUNNER_
         if err:
             print(err.decode('utf-8',errors='replace'),end='')
         require(code==0, 'CP080 strict sandbox '+mode+' failed (no fallback), exit '+str(code))
-        require(snapshot()==before and sha(binary)==BINARY,'component or binary mutated')
+        require(snapshot()==before and sha(binary)==BINARY and sha(bwrap_binary)==NATIVE_BINARY_SHA256,
+                'component or verified binary mutated')
 print('CP080 CI checks passed; 12 normal + 12 optimized, zero failures/errors/skips.')
 print('Includes actual Vale, mocks and Python process probes; not 12 actual Vale integration cases.')
 print('Native adoption, SBOM/scans/recovery, aggregate physical RAM/PIDs/inodes, 576/G02/production remain held.')
