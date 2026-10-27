@@ -1,0 +1,7 @@
+extends: existence
+message: "Synthetic editorial guard triggered."
+level: warning
+scope: text
+ignorecase: false
+tokens:
+  - CP080_FORBIDDEN_PHRASE
